@@ -30,8 +30,8 @@ Unlike traditional translators restricted to web browsers, this tool operates gl
 Clone the repository:
 
 ```bash
-git clone https://github.com/your_username/repository_name.git
-cd repository_name
+git clone https://github.com/ananie1/ananie1-Local-AI-Screen-Translator.git
+cd ananie1-Local-AI-Screen-Translator
 ```
 
 Install the required dependencies:
@@ -111,8 +111,8 @@ Local AI Screen Translator — это легковесная модульная 
 Клонируйте репозиторий:
 
 ```
-git clone https://github.com/your_username/repository_name.git
-cd repository_name
+git clone https://github.com/ananie1/ananie1-Local-AI-Screen-Translator.git
+cd ananie1-Local-AI-Screen-Translator
 
 
 ```
