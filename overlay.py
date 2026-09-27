@@ -5,6 +5,7 @@ from PyQt6.QtGui import QFont
 class SubtitleOverlay(QWidget):
     def __init__(self):
         super().__init__()
+        # Keep the overlay above other windows without a frame or taskbar entry.
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.FramelessWindowHint |
@@ -12,12 +13,13 @@ class SubtitleOverlay(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+        # Stores the cursor offset used when dragging the overlay.
         self.drag_position = QPoint()
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.label = QLabel("Local AI Translator (Зажми ЛКМ, чтобы перетащить)")
+        self.label = QLabel("Local AI Screen Translator (Hold LMB to drag)")
         self.label.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
         self.label.setStyleSheet("""
             QLabel {

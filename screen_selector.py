@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen
 
 class ScreenSelector(QWidget):
+    # Emits the selected screen area as (x, y, width, height).
     area_selected = pyqtSignal(tuple)
 
     def __init__(self):
@@ -37,9 +38,11 @@ class ScreenSelector(QWidget):
             self.is_selecting = False
             self.hide()
 
+            # Normalize the rectangle so it works regardless of drag direction.
             rect = QRect(self.start_point, self.end_point).normalized()
             x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
 
+            # Ignore accidental clicks and areas that are too small to process.
             if w > 5 and h > 5:
                 self.area_selected.emit((x, y, w, h))
 

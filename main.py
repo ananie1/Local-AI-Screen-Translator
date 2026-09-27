@@ -16,7 +16,7 @@ class HotkeySignaler(QObject):
     select_triggered = pyqtSignal()
     retranslate_triggered = pyqtSignal()
 
-# Поток для фоновой загрузки OCR, чтобы окно не фризилось
+# A thread for background OCR loading to prevent the window from freezing
 class OCRInitWorker(QThread):
     loaded = pyqtSignal(object)
 
@@ -29,6 +29,7 @@ class OCRInitWorker(QThread):
         self.loaded.emit(ocr)
 
 
+# Runs OCR and LLM translation outside the GUI thread.
 class TranslationWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
@@ -45,7 +46,7 @@ class TranslationWorker(QThread):
             self.llm.api_url = self.api_url
             raw_text = self.ocr.grab_and_read(self.bbox)
             if not raw_text.strip():
-                self.finished.emit("[Текст не найден]")
+                self.finished.emit("[No text found]")
                 return
 
             translated = self.llm.translate(raw_text)
@@ -60,7 +61,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("Local AI Screen Translator")
         self.resize(440, 320)
 
-        self.ocr = None  # Пока загружается в фоне
+        self.ocr = None  # While it’s loading in the background
         self.llm = LLMTranslator(api_url="http://localhost:1234/v1")
         
         self.overlay = SubtitleOverlay()
@@ -80,15 +81,15 @@ class MainWindow(QWidget):
         self.setup_tray()
         self.setup_hotkeys()
 
-        # Запускаем загрузку OCR в фоновом потоке
-        self.status_label.setText("Загрузка OCR в фоновом режиме...")
+        # We start the OCR loading in the background thread
+        self.status_label.setText("Loading OCR in the background...")
         self.init_worker = OCRInitWorker(['en'])
         self.init_worker.loaded.connect(self.on_ocr_loaded)
         self.init_worker.start()
 
     def on_ocr_loaded(self, ocr_engine):
         self.ocr = ocr_engine
-        self.status_label.setText("Готов к работе. Нажмите Alt+T прямо в игре")
+        self.status_label.setText("Ready. Press Alt+T")
 
     def init_ui(self):
         self.setStyleSheet("""
@@ -146,19 +147,19 @@ class MainWindow(QWidget):
         layout.setSpacing(14)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        api_group = QGroupBox(" ПОДКЛЮЧЕНИЕ К ИИ ")
+        api_group = QGroupBox(" AI CONNECTION ")
         api_layout = QVBoxLayout()
         self.url_input = QLineEdit("http://localhost:1234/v1")
         api_layout.addWidget(self.url_input)
         api_group.setLayout(api_layout)
         layout.addWidget(api_group)
 
-        controls_group = QGroupBox(" УПРАВЛЕНИЕ (ГОРЯЧИЕ КЛАВИШИ) ")
+        controls_group = QGroupBox(" CONTROLS (HOTKEYS) ")
         controls_layout = QVBoxLayout()
         controls_layout.setSpacing(10)
 
         select_row = QHBoxLayout()
-        self.btn_select = QPushButton("✂ Выделить область")
+        self.btn_select = QPushButton("✂ Select area")
         self.btn_select.setObjectName("primary_btn")
         self.btn_select.clicked.connect(self.start_selection)
         hk_select_label = QLabel("Alt + T")
@@ -168,7 +169,7 @@ class MainWindow(QWidget):
         controls_layout.addLayout(select_row)
 
         retrans_row = QHBoxLayout()
-        self.btn_retranslate = QPushButton("🔄 Перевести снова")
+        self.btn_retranslate = QPushButton("🔄 Translate again")
         self.btn_retranslate.clicked.connect(self.process_translation)
         hk_retrans_label = QLabel("Alt + R")
         hk_retrans_label.setStyleSheet("color: #007ACC; font-weight: bold; padding-left: 5px;")
@@ -179,7 +180,7 @@ class MainWindow(QWidget):
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
 
-        self.status_label = QLabel("Инициализация...")
+        self.status_label = QLabel("Initializing...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet("color: #777777; font-size: 11px; margin-top: 5px;")
         layout.addWidget(self.status_label)
@@ -189,16 +190,16 @@ class MainWindow(QWidget):
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
         
-        # Создаем временную иконку из стандартного набора Qt через QWidget
+        # Use a temporary standard Qt icon for the system tray
         standard_icon = self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon)
         self.tray_icon.setIcon(standard_icon)
         self.setWindowIcon(standard_icon)
 
         tray_menu = QMenu()
-        show_action = QAction("Открыть окно", self)
+        show_action = QAction("Open window", self)
         show_action.triggered.connect(self.show_window)
         
-        quit_action = QAction("Выйти из программы", self)
+        quit_action = QAction("Exit application", self)
         quit_action.triggered.connect(self.force_quit)
 
         tray_menu.addAction(show_action)
@@ -229,34 +230,35 @@ class MainWindow(QWidget):
             keyboard.add_hotkey('alt+t', lambda: self.signaler.select_triggered.emit())
             keyboard.add_hotkey('alt+r', lambda: self.signaler.retranslate_triggered.emit())
         except Exception as e:
-            self.status_label.setText(f"Ошибка хоткеев: {e}")
+            self.status_label.setText(f"Hotkey error: {e}")
 
     def start_selection(self):
         if self.ocr is None:
-            self.status_label.setText("Подождите, OCR еще загружается в фоне...")
+            self.status_label.setText("Please wait, OCR is still loading in the background...")
             return
         self.selector.show()
 
     def on_area_selected(self, bbox: tuple):
         x, y, w, h = bbox
-        # Переводим ширину/высоту в конечные координаты (правый и нижний край)
+        # Convert the width/height to final coordinates (right and bottom edges)
         self.current_bbox = (x, y, x + w, y + h)
         self.process_translation()
 
     def process_translation(self):
         if self.ocr is None:
-            self.status_label.setText("Подождите, OCR еще загружается в фоне...")
+            self.status_label.setText("Please wait, OCR is still loading in the background...")
             return
 
         if not self.current_bbox:
-            self.status_label.setText("Сначала выделите область (Alt+T)!")
+            self.status_label.setText("Select an area first (Alt+T)!")
             return
 
+        # Prevent multiple translation workers from running at the same time.
         if self.worker is not None and self.worker.isRunning():
             return
 
-        self.overlay.set_text("Переводим через AI...")
-        self.status_label.setText("Статус: Запрос к нейросети...")
+        self.overlay.set_text("Translating with AI...")
+        self.status_label.setText("Status: Sending request to AI...")
 
         api_url = self.url_input.text().rstrip('/')
         self.worker = TranslationWorker(self.ocr, self.llm, self.current_bbox, api_url)
@@ -266,12 +268,12 @@ class MainWindow(QWidget):
 
     def on_translation_finished(self, text: str):
         self.overlay.set_text(text)
-        self.status_label.setText("Статус: Перевод обновлен")
+        self.status_label.setText("Status: Translation updated")
 
     def on_translation_error(self, err_msg: str):
-        print(f"ПОЙМАЛИ ОШИБКУ: {err_msg}")
-        self.overlay.set_text("[Ошибка перевода]")
-        self.status_label.setText(f"Ошибка: {err_msg}")
+        print(f"CAUGHT ERROR: {err_msg}")
+        self.overlay.set_text("[Translation error]")
+        self.status_label.setText(f"Error: {err_msg}")
 
     def closeEvent(self, event):
         if self.tray_icon.isVisible():
