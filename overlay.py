@@ -17,7 +17,7 @@ class SubtitleOverlay(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.label = QLabel("AI Game Translator (Зажми ЛКМ, чтобы перетащить)")
+        self.label = QLabel("Local AI Translator (Зажми ЛКМ, чтобы перетащить)")
         self.label.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
         self.label.setStyleSheet("""
             QLabel {
