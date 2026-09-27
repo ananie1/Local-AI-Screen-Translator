@@ -118,8 +118,8 @@ Global keyboard shortcuts are handled via the `keyboard` library. To modify the 
 
 ### Changing Languages
 
-* **OCR Language:** The recognition language can be changed in `ocr_engine.py` by modifying the `lang_list` parameter.
-* **Translation Language:** The target language for translation is controlled directly through the system prompt configuration sent to the local LLM client.
+* **OCR Language:** The recognition language can be changed in `ocr_engine.py` by modifying the `lang_list` parameter. Multiple languages can be specified at the same time, for example `['en', 'ru', 'de']`.
+* **Translation Language:** The target language for translation is controlled through the system prompt in `llm_client.py`.
 
 ## Project Structure
 
@@ -261,9 +261,9 @@ python main.py
 
 ### Настройка языков
 
-* **Язык распознавания (OCR):** Язык распознавания можно изменить в `ocr_engine.py`, изменив параметр `lang_list`.
+* **Язык распознавания (OCR):** Язык распознавания можно изменить в `ocr_engine.py`, изменив параметр `lang_list`. Можно указать несколько языков одновременно, например `['en', 'ru', 'de']`.
 
-* **Язык перевода:** Целевой язык перевода задается через системный промпт (инструкцию) в модуле клиента LLM.
+* **Язык перевода:** Целевой язык перевода задается через системный промпт (инструкцию) в файле `llm_client.py`.
 
 ## Структура проекта
 
