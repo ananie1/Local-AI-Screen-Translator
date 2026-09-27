@@ -13,9 +13,51 @@ Unlike traditional translators restricted to web browsers, this tool operates gl
 * **Neural Translation:** The extracted text is transmitted via a local API to a running LLM instance (such as LM Studio), which translates the text contextually into the target language.
 * **Display:** The translated result is presented cleanly to the user.
 
+## How CPU, GPU, and LLM Are Used
+
+The application consists of several independent components, and they do not all use the GPU.
+
+The translation process works as follows:
+
+1. **Screen Capture** — the application captures the selected area of the screen.
+2. **OCR** — EasyOCR analyzes the captured image and extracts the text.
+
+   * If a CUDA-compatible NVIDIA GPU is available, EasyOCR uses the GPU for OCR processing.
+   * If CUDA is unavailable, EasyOCR automatically falls back to the CPU.
+3. **LLM Translation** — the recognized text is sent to a locally running LLM server, such as LM Studio, or to a compatible external API.
+4. **Display** — the translated text is displayed in the application overlay.
+
+The GPU acceleration described above applies specifically to **OCR processing**. It does not mean that the entire application runs on the GPU.
+
+The LLM is a separate component. If LM Studio is used, the way the LLM itself uses the CPU or GPU is determined by LM Studio and its model configuration, independently of the OCR engine.
+
+In simplified form:
+
+```text
+Screen
+   ↓
+Screen Capture
+   ↓
+EasyOCR
+   ├── NVIDIA GPU + CUDA
+   └── CPU (fallback)
+   ↓
+Recognized Text
+   ↓
+LM Studio / Compatible API
+   ↓
+LLM Translation
+   ↓
+Translated Text
+   ↓
+Overlay
+```
+
+The application therefore does not require a dedicated GPU. A GPU is only an optional acceleration method for the OCR stage.
+
 ## Key Features
 
-* **Full Privacy:** Operates entirely offline on your hardware. No telemetry, no third-party cloud tracking.
+* **Full Privacy:** When used with a local LLM, all processing remains on your hardware. No telemetry or third-party cloud tracking is included.
 * **Universal Compatibility:** Works over any full-screen or windowed application, web page, or document interface.
 * **Modular Architecture:** Clean separation of concerns between the graphical interface, screen selector, OCR processing, and LLM communication clients.
 * **System Tray Integration:** Runs discreetly in the background with quick access controls.
@@ -76,7 +118,7 @@ Global keyboard shortcuts are handled via the `keyboard` library. To modify the 
 
 ### Changing Languages
 
-* **OCR Language:** The recognition language can be adjusted in the OCR engine initialization module by modifying parameters.
+* **OCR Language:** The recognition language can be changed in `ocr_engine.py` by modifying the `lang_list` parameter.
 * **Translation Language:** The target language for translation is controlled directly through the system prompt configuration sent to the local LLM client.
 
 ## Project Structure
@@ -111,9 +153,51 @@ Local AI Screen Translator — это легковесная модульная 
 
 * **Вывод результата:** Готовый перевод отображается в интерфейсе приложения.
 
+## Как используются CPU, GPU и LLM
+
+Приложение состоит из нескольких независимых компонентов, и далеко не все они используют видеокарту.
+
+Процесс перевода выглядит следующим образом:
+
+1. **Захват экрана** — программа получает изображение выбранной области экрана.
+2. **OCR** — EasyOCR анализирует полученное изображение и распознает текст.
+
+   * Если доступна совместимая с CUDA видеокарта NVIDIA, EasyOCR использует GPU для обработки OCR.
+   * Если CUDA недоступна, EasyOCR автоматически использует CPU.
+3. **Перевод через LLM** — распознанный текст отправляется на локальный сервер LLM, например LM Studio, либо на совместимый внешний API.
+4. **Вывод** — готовый перевод отображается в оверлее приложения.
+
+Указанное выше ускорение GPU относится именно к **обработке OCR**. Это не означает, что вся программа работает на видеокарте.
+
+LLM является отдельным компонентом. Если используется LM Studio, способ использования CPU и GPU самой языковой моделью определяется настройками LM Studio и модели и не зависит от OCR-движка.
+
+В упрощенном виде:
+
+```text
+Экран
+   ↓
+Захват экрана
+   ↓
+EasyOCR
+   ├── NVIDIA GPU + CUDA
+   └── CPU (резервный вариант)
+   ↓
+Распознанный текст
+   ↓
+LM Studio / совместимый API
+   ↓
+Перевод через LLM
+   ↓
+Переведенный текст
+   ↓
+Оверлей
+```
+
+Таким образом, наличие дискретной видеокарты не является обязательным требованием. GPU используется только как дополнительное ускорение этапа OCR.
+
 ## Ключевые особенности
 
-* **Полная конфиденциальность:** Работает полностью офлайн на вашем оборудовании без сторонней телеметрии.
+* **Полная конфиденциальность:** При использовании локальной LLM обработка выполняется на вашем оборудовании. Приложение не содержит телеметрии и стороннего облачного трекинга..
 
 * **Универсальность применения:** Подходит для работы с любыми окнами, приложениями, сайтами и медиаконтентом.
 
@@ -177,7 +261,7 @@ python main.py
 
 ### Настройка языков
 
-* **Язык распознавания (OCR):** Настраивается в конфигурационном файле инициализации OCR-модуля путем изменения языковых параметров.
+* **Язык распознавания (OCR):** Язык распознавания можно изменить в `ocr_engine.py`, изменив параметр `lang_list`.
 
 * **Язык перевода:** Целевой язык перевода задается через системный промпт (инструкцию) в модуле клиента LLM.
 
