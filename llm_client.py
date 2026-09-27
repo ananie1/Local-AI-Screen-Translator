@@ -31,7 +31,7 @@ class LLMTranslator:
             messages.append({"role": "user", "content": item["orig"]})
             messages.append({"role": "assistant", "content": item["trans"]})
 
-        messages.append({"role": "user", "content": f"Переведи на русский:\n{text}"})
+        messages.append({"role": "user", "content": text})
 
         # The request uses the OpenAI Chat Completions format,
         # allowing the client to work with LM Studio and other compatible servers.
