@@ -15,7 +15,7 @@ Unlike traditional translators restricted to web browsers, this tool operates gl
 
 ## How CPU, GPU, and LLM Are Used
 
-The application consists of several independent components, and they do not all use the GPU.
+The software consists of several independent components, and they do not all use the GPU.
 
 The translation process works as follows:
 
@@ -155,7 +155,7 @@ Local AI Screen Translator — это легковесная модульная 
 
 ## Как используются CPU, GPU и LLM
 
-Приложение состоит из нескольких независимых компонентов, и далеко не все они используют видеокарту.
+Программа состоит из нескольких независимых компонентов, и далеко не все они используют видеокарту.
 
 Процесс перевода выглядит следующим образом:
 
