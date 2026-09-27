@@ -38,7 +38,7 @@ class LLMTranslator:
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
         try:
-            response = requests.post(f"{self.api_url}/chat/completions", json=payload, headers=headers, timeout=10)
+            response = requests.post(f"{self.api_url}/chat/completions", json=payload, headers=headers, timeout=120)
             response.raise_for_status()
             result = response.json()["choices"][0]["message"]["content"].strip()
 
