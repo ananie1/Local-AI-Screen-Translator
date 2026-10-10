@@ -1,37 +1,63 @@
-import easyocr
-from PIL import ImageGrab
+"""Модуль распознавания текста на базе RapidOCR (ONNX, только CPU)."""
+from __future__ import annotations
+
+import threading
+
 import numpy as np
-import torch
+from PIL import Image
 
 
-class EasyOCREngine:
-    def __init__(self, lang_list=None):
-        if lang_list is None:
-            lang_list = ['en']
+class OcrError(RuntimeError):
+    """Ошибка инициализации или работы OCR."""
 
-        print("[OCR] Initializing EasyOCR...")
 
-        gpu_available = torch.cuda.is_available()
+class OcrEngine:
+    """Ленивая обёртка над RapidOCR. Потокобезопасна."""
 
-        self.reader = easyocr.Reader(
-            lang_list,
-            gpu=gpu_available
-        )
+    def __init__(self) -> None:
+        self._engine = None
+        self._lock = threading.Lock()
 
-        if gpu_available:
-            print(f"[OCR] Engine successfully started on GPU: {torch.cuda.get_device_name(0)}")
-        else:
-            print("[OCR] CUDA is unavailable. Engine started on CPU")
+    def _get_engine(self):
+        if self._engine is None:
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+            except ImportError as exc:  # pragma: no cover
+                raise OcrError(
+                    "Не установлен rapidocr-onnxruntime. "
+                    "Выполните: pip install rapidocr-onnxruntime"
+                ) from exc
+            self._engine = RapidOCR()
+        return self._engine
 
-    def grab_and_read(self, bbox: tuple) -> str:
-        # Capture the selected screen region.
-        img = ImageGrab.grab(bbox=bbox)
+    @staticmethod
+    def _prepare(image: Image.Image) -> np.ndarray:
+        img = image.convert("RGB")
+        # Мелкий текст распознаётся заметно лучше после увеличения.
+        if min(img.size) < 120:
+            img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+        return np.ascontiguousarray(np.array(img)[:, :, ::-1])  # RGB -> BGR
 
-        # Convert the PIL image to a NumPy array required by EasyOCR.
-        img_np = np.array(img)
+    def recognize(self, image: Image.Image) -> str:
+        """Возвращает распознанный текст (строки разделены переводом строки)."""
+        array = self._prepare(image)
+        try:
+            with self._lock:
+                result, _ = self._get_engine()(array)
+        except OcrError:
+            raise
+        except Exception as exc:
+            raise OcrError(f"Ошибка распознавания: {exc}") from exc
 
-        # Run OCR and return detected text without bounding box data.
-        results = self.reader.readtext(img_np, detail=0)
+        if not result:
+            return ""
 
-        text = " ".join(results).strip()
-        return text
+        # item: [box(4 точки), text, score]. Сортируем по строкам сверху вниз, слева направо.
+        def key(item):
+            box = item[0]
+            top = min(p[1] for p in box)
+            left = min(p[0] for p in box)
+            return (round(top / 12), left)
+
+        lines = [item[1].strip() for item in sorted(result, key=key) if item[1].strip()]
+        return "\n".join(lines)

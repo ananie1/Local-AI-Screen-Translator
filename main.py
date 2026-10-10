@@ -1,290 +1,197 @@
+"""Главный модуль: GUI настроек и связывание цепочки
+Захват области -> OCR -> LLM -> Оверлей."""
+from __future__ import annotations
+
 import sys
-import keyboard
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, 
-    QPushButton, QLineEdit, QLabel, QHBoxLayout, QGroupBox,
-    QSystemTrayIcon, QMenu
+
+from PIL import Image
+from PySide6.QtCore import QRect, QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtWidgets import (
+    QApplication,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
-from PyQt6.QtGui import QIcon, QAction
-from overlay import SubtitleOverlay
-from ocr_engine import EasyOCREngine
-from llm_client import LLMTranslator
-from screen_selector import ScreenSelector
 
-class HotkeySignaler(QObject):
-    select_triggered = pyqtSignal()
-    retranslate_triggered = pyqtSignal()
-
-# A thread for background OCR loading to prevent the window from freezing
-class OCRInitWorker(QThread):
-    loaded = pyqtSignal(object)
-
-    def __init__(self, lang_list):
-        super().__init__()
-        self.lang_list = lang_list
-
-    def run(self):
-        ocr = EasyOCREngine(self.lang_list)
-        self.loaded.emit(ocr)
+from llm_client import DEFAULT_URL, LLMClient, LLMConfig
+from ocr_engine import OcrEngine
+from overlay import TranslationOverlay
+from screen_selector import ScreenSelector, Selection
 
 
-# Runs OCR and LLM translation outside the GUI thread.
-class TranslationWorker(QThread):
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
+class PipelineThread(QThread):
+    """Фоновая цепочка OCR -> LLM. GUI-поток при этом не блокируется."""
 
-    def __init__(self, ocr, llm, bbox, api_url):
-        super().__init__()
-        self.ocr = ocr
-        self.llm = llm
-        self.bbox = bbox
-        self.api_url = api_url
+    status = Signal(str)
+    recognized = Signal(str)
+    translated = Signal(str)
+    failed = Signal(str)
 
-    def run(self):
+    def __init__(self, ocr: OcrEngine, llm: LLMClient, image: Image.Image, parent=None) -> None:
+        super().__init__(parent)
+        self._ocr = ocr
+        self._llm = llm
+        self._image = image
+
+    def run(self) -> None:
         try:
-            self.llm.api_url = self.api_url
-            raw_text = self.ocr.grab_and_read(self.bbox)
-            if not raw_text.strip():
-                self.finished.emit("[No text found]")
+            self.status.emit("Распознавание текста…")
+            text = self._ocr.recognize(self._image)
+            if not text.strip():
+                self.failed.emit("Текст в выделенной области не найден.")
                 return
+            self.recognized.emit(text)
 
-            translated = self.llm.translate(raw_text)
-            self.finished.emit(translated)
-        except Exception as e:
-            self.error.emit(str(e))
+            self.status.emit("Перевод через LLM…")
+            result = self._llm.translate(text)
+            self.translated.emit(result)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
 
 
-class MainWindow(QWidget):
-    def __init__(self):
+class MainWindow(QMainWindow):
+    def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Local AI Screen Translator")
-        self.resize(440, 320)
+        self.setWindowTitle("Умный экранный переводчик")
+        self.setMinimumWidth(480)
 
-        self.ocr = None  # While it’s loading in the background
-        self.llm = LLMTranslator(api_url="http://localhost:1234/v1")
-        
-        self.overlay = SubtitleOverlay()
-        self.overlay.show()
+        self._settings = QSettings("ScreenTranslator", "ScreenTranslator")
+        self._ocr = OcrEngine()
+        self._selector = ScreenSelector()
+        self._overlay = TranslationOverlay()
+        self._thread: PipelineThread | None = None
+        self._anchor: QRect | None = None
 
-        self.selector = ScreenSelector()
-        self.selector.area_selected.connect(self.on_area_selected)
+        self._build_ui()
+        self._load_settings()
 
-        self.current_bbox = None
-        self.worker = None
+        self._selector.selected.connect(self._on_selected)
+        self._selector.cancelled.connect(self._on_cancelled)
 
-        self.signaler = HotkeySignaler()
-        self.signaler.select_triggered.connect(self.start_selection)
-        self.signaler.retranslate_triggered.connect(self.process_translation)
+    # ------------------------------------------------------------------ UI
+    def _build_ui(self) -> None:
+        self._url = QLineEdit()
+        self._url.setPlaceholderText(DEFAULT_URL)
+        self._key = QLineEdit()
+        self._key.setEchoMode(QLineEdit.Password)
+        self._key.setPlaceholderText("Оставьте пустым для локальной модели")
+        self._model = QLineEdit()
+        self._model.setPlaceholderText("например, local-model или llama3")
 
-        self.init_ui()
-        self.setup_tray()
-        self.setup_hotkeys()
+        form = QFormLayout()
+        form.addRow("URL сервера:", self._url)
+        form.addRow("API-ключ:", self._key)
+        form.addRow("Модель:", self._model)
+        group = QGroupBox("Подключение к LLM")
+        group.setLayout(form)
 
-        # We start the OCR loading in the background thread
-        self.status_label.setText("Loading OCR in the background...")
-        self.init_worker = OCRInitWorker(['en'])
-        self.init_worker.loaded.connect(self.on_ocr_loaded)
-        self.init_worker.start()
+        self._button = QPushButton("Выделить область и перевести")
+        self._button.setMinimumHeight(40)
+        self._button.clicked.connect(self._start)
 
-    def on_ocr_loaded(self, ocr_engine):
-        self.ocr = ocr_engine
-        self.status_label.setText("Ready. Press Alt+T")
+        self._status = QLabel("Готово к работе.")
+        self._status.setWordWrap(True)
 
-    def init_ui(self):
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #121212;
-                color: #E0E0E0;
-                font-family: 'Segoe UI', sans-serif;
-            }
-            QGroupBox {
-                border: 1px solid #2A2A2A;
-                border-radius: 8px;
-                margin-top: 10px;
-                font-weight: bold;
-                color: #888888;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-            QLineEdit {
-                background-color: #1E1E1E;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #FFFFFF;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #007ACC;
-            }
-            QPushButton {
-                background-color: #252526;
-                border: 1px solid #3E3E42;
-                border-radius: 6px;
-                padding: 10px 16px;
-                color: #FFFFFF;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #2D2D30;
-                border-color: #007ACC;
-            }
-            QPushButton#primary_btn {
-                background-color: #0066B8;
-                border: none;
-            }
-            QPushButton#primary_btn:hover {
-                background-color: #0078D4;
-            }
-        """)
+        self._source = QPlainTextEdit()
+        self._source.setReadOnly(True)
+        self._source.setPlaceholderText("Здесь появится распознанный текст…")
+        self._source.setMaximumHeight(110)
 
         layout = QVBoxLayout()
-        layout.setSpacing(14)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.addWidget(group)
+        layout.addWidget(self._button)
+        layout.addWidget(self._status)
+        layout.addWidget(QLabel("Распознанный текст:"))
+        layout.addWidget(self._source)
+        central = QWidget()
+        central.setLayout(layout)
+        self.setCentralWidget(central)
 
-        api_group = QGroupBox(" AI CONNECTION ")
-        api_layout = QVBoxLayout()
-        self.url_input = QLineEdit("http://localhost:1234/v1")
-        api_layout.addWidget(self.url_input)
-        api_group.setLayout(api_layout)
-        layout.addWidget(api_group)
+    def _load_settings(self) -> None:
+        self._url.setText(self._settings.value("url", DEFAULT_URL))
+        self._key.setText(self._settings.value("api_key", ""))
+        self._model.setText(self._settings.value("model", "local-model"))
 
-        controls_group = QGroupBox(" CONTROLS (HOTKEYS) ")
-        controls_layout = QVBoxLayout()
-        controls_layout.setSpacing(10)
+    def _save_settings(self) -> None:
+        self._settings.setValue("url", self._url.text().strip())
+        self._settings.setValue("api_key", self._key.text().strip())
+        self._settings.setValue("model", self._model.text().strip())
 
-        select_row = QHBoxLayout()
-        self.btn_select = QPushButton("✂ Select area")
-        self.btn_select.setObjectName("primary_btn")
-        self.btn_select.clicked.connect(self.start_selection)
-        hk_select_label = QLabel("Alt + T")
-        hk_select_label.setStyleSheet("color: #007ACC; font-weight: bold; padding-left: 5px;")
-        select_row.addWidget(self.btn_select, stretch=2)
-        select_row.addWidget(hk_select_label, stretch=1)
-        controls_layout.addLayout(select_row)
+    def _config(self) -> LLMConfig:
+        return LLMConfig(
+            url=self._url.text().strip() or DEFAULT_URL,
+            api_key=self._key.text().strip(),
+            model=self._model.text().strip() or "local-model",
+        )
 
-        retrans_row = QHBoxLayout()
-        self.btn_retranslate = QPushButton("🔄 Translate again")
-        self.btn_retranslate.clicked.connect(self.process_translation)
-        hk_retrans_label = QLabel("Alt + R")
-        hk_retrans_label.setStyleSheet("color: #007ACC; font-weight: bold; padding-left: 5px;")
-        retrans_row.addWidget(self.btn_retranslate, stretch=2)
-        retrans_row.addWidget(hk_retrans_label, stretch=1)
-        controls_layout.addLayout(retrans_row)
+    # ------------------------------------------------------------ pipeline
+    def _start(self) -> None:
+        if self._thread is not None and self._thread.isRunning():
+            return
+        self._save_settings()
+        self._overlay.hide()
+        self._button.setEnabled(False)
+        self.hide()  # убираем главное окно, чтобы оно не попало в кадр
+        QTimer.singleShot(250, self._selector.start)
 
-        controls_group.setLayout(controls_layout)
-        layout.addWidget(controls_group)
+    def _on_cancelled(self) -> None:
+        self._button.setEnabled(True)
+        self._status.setText("Выделение отменено.")
+        self._restore_window()
 
-        self.status_label = QLabel("Initializing...")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #777777; font-size: 11px; margin-top: 5px;")
-        layout.addWidget(self.status_label)
+    def _on_selected(self, selection: Selection) -> None:
+        self._anchor = selection.rect
+        self._restore_window()
+        self._source.clear()
 
-        self.setLayout(layout)
+        thread = PipelineThread(self._ocr, LLMClient(self._config()), selection.image, self)
+        thread.status.connect(self._status.setText)
+        thread.recognized.connect(self._source.setPlainText)
+        thread.translated.connect(self._on_translated)
+        thread.failed.connect(self._on_failed)
+        thread.finished.connect(self._on_thread_finished)
+        self._thread = thread
+        thread.start()
 
-    def setup_tray(self):
-        self.tray_icon = QSystemTrayIcon(self)
-        
-        # Use a temporary standard Qt icon for the system tray
-        standard_icon = self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon)
-        self.tray_icon.setIcon(standard_icon)
-        self.setWindowIcon(standard_icon)
+    def _on_translated(self, text: str) -> None:
+        self._status.setText("Готово.")
+        self._overlay.show_translation(text, self._anchor)
 
-        tray_menu = QMenu()
-        show_action = QAction("Open window", self)
-        show_action.triggered.connect(self.show_window)
-        
-        quit_action = QAction("Exit application", self)
-        quit_action.triggered.connect(self.force_quit)
+    def _on_failed(self, message: str) -> None:
+        self._status.setText(f"Ошибка: {message}")
+        QMessageBox.warning(self, "Ошибка", message)
 
-        tray_menu.addAction(show_action)
-        tray_menu.addSeparator()
-        tray_menu.addAction(quit_action)
+    def _on_thread_finished(self) -> None:
+        self._button.setEnabled(True)
 
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self.on_tray_icon_activated)
-        self.tray_icon.show()
-
-    def on_tray_icon_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            if self.isVisible():
-                self.hide()
-            else:
-                self.show_window()
-
-    def show_window(self):
+    def _restore_window(self) -> None:
         self.show()
+        self.raise_()
         self.activateWindow()
 
-    def force_quit(self):
-        keyboard.unhook_all()
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._save_settings()
+        self._overlay.hide()
+        if self._thread is not None and self._thread.isRunning():
+            self._thread.wait(3000)
+        event.accept()
         QApplication.quit()
 
-    def setup_hotkeys(self):
-        try:
-            keyboard.add_hotkey('alt+t', lambda: self.signaler.select_triggered.emit())
-            keyboard.add_hotkey('alt+r', lambda: self.signaler.retranslate_triggered.emit())
-        except Exception as e:
-            self.status_label.setText(f"Hotkey error: {e}")
 
-    def start_selection(self):
-        if self.ocr is None:
-            self.status_label.setText("Please wait, OCR is still loading in the background...")
-            return
-        self.selector.show()
-
-    def on_area_selected(self, bbox: tuple):
-        x, y, w, h = bbox
-        # Convert the width/height to final coordinates (right and bottom edges)
-        self.current_bbox = (x, y, x + w, y + h)
-        self.process_translation()
-
-    def process_translation(self):
-        if self.ocr is None:
-            self.status_label.setText("Please wait, OCR is still loading in the background...")
-            return
-
-        if not self.current_bbox:
-            self.status_label.setText("Select an area first (Alt+T)!")
-            return
-
-        # Prevent multiple translation workers from running at the same time.
-        if self.worker is not None and self.worker.isRunning():
-            return
-
-        self.overlay.set_text("Translating with AI...")
-        self.status_label.setText("Status: Sending request to AI...")
-
-        api_url = self.url_input.text().rstrip('/')
-        self.worker = TranslationWorker(self.ocr, self.llm, self.current_bbox, api_url)
-        self.worker.finished.connect(self.on_translation_finished)
-        self.worker.error.connect(self.on_translation_error)
-        self.worker.start()
-
-    def on_translation_finished(self, text: str):
-        self.overlay.set_text(text)
-        self.status_label.setText("Status: Translation updated")
-
-    def on_translation_error(self, err_msg: str):
-        print(f"CAUGHT ERROR: {err_msg}")
-        self.overlay.set_text("[Translation error]")
-        self.status_label.setText(f"Error: {err_msg}")
-
-    def closeEvent(self, event):
-        if self.tray_icon.isVisible():
-            self.hide()
-            event.ignore()
-        else:
-            event.accept()
-
-if __name__ == "__main__":
+def main() -> int:
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("ScreenTranslator")
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
