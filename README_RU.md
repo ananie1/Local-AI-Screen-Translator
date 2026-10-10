@@ -42,8 +42,8 @@ OCR и сетевой запрос выполняются в отдельном 
 ## Установка
 
 ```bash
-git clone <ссылка-на-репозиторий>
-cd <папка-репозитория>
+git clone https://github.com/ananie1/Local-AI-Screen-Translator.git
+cd Local-AI-Screen-Translator
 python -m venv .venv
 # Windows:      .venv\Scripts\activate
 # Linux/macOS:  source .venv/bin/activate
