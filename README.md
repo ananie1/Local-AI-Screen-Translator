@@ -1,138 +1,140 @@
-# Local AI Screen Translator EN
+# Local AI Screen Translator 2.0
 
 🌐 **Language:** [English](README.md) | [Русский](README_RU.md)
 
 ## Overview
 
-Local AI Screen Translator is a lightweight, modular desktop utility designed to capture, recognize, and translate text from any region of your screen in real time. Built with privacy and offline performance in mind, the application processes text locally using Optical Character Recognition (OCR) and translates it via a locally hosted Large Language Model (LLM) or compatible API keys.
+Local AI Screen Translator is a lightweight, modular desktop tool that captures any area of your screen, recognizes the text on it (OCR) and translates it into Russian with a language model. The model can run locally (LM Studio, Ollama) or be reached through any OpenAI-compatible API with a key.
 
-Unlike traditional translators restricted to web browsers, this tool operates globally across the operating system interface. It is perfectly suited for video games, desktop software, foreign websites, media players, and documents, allowing you to translate text seamlessly without sending your data to external cloud servers.
+It works at the operating-system level, not inside a browser, so it fits games, desktop software, foreign websites, media players and documents alike. The app itself sends nothing anywhere except one request to the LLM server you configure.
 
-## How It Works
-
-* **Screen Capture:** The user selects a specific area on the screen using a custom interactive overlay.
-* **Text Recognition (OCR):** The application extracts raw text from the captured image using the offline EasyOCR engine.
-* **Neural Translation:** The extracted text is transmitted via a local API to a running LLM instance (such as LM Studio), which translates the text contextually into the target language.
-* **Display:** The translated result is presented cleanly to the user.
-
-## How CPU, GPU, and LLM Are Used
-
-The software consists of several independent components, and they do not all use the GPU.
-
-The translation process works as follows:
-
-1. **Screen Capture** — the application captures the selected area of the screen.
-2. **OCR** — EasyOCR analyzes the captured image and extracts the text.
-
-   * If a CUDA-compatible NVIDIA GPU is available, EasyOCR uses the GPU for OCR processing.
-   * If CUDA is unavailable, EasyOCR automatically falls back to the CPU.
-3. **LLM Translation** — the recognized text is sent to a locally running LLM server, such as LM Studio, or to a compatible external API.
-4. **Display** — the translated text is displayed in the application overlay.
-
-The GPU acceleration described above applies specifically to **OCR processing**. It does not mean that the entire application runs on the GPU.
-
-The LLM is a separate component. If LM Studio is used, the way the LLM itself uses the CPU or GPU is determined by LM Studio and its model configuration, independently of the OCR engine.
-
-In simplified form:
+## How it works
 
 ```text
-Screen
-   ↓
-Screen Capture
-   ↓
-EasyOCR
-   ├── NVIDIA GPU + CUDA
-   └── CPU (fallback)
-   ↓
-Recognized Text
-   ↓
-LM Studio / Compatible API
-   ↓
-LLM Translation
-   ↓
-Translated Text
-   ↓
-Overlay
+Select area  →  OCR  →  LLM request  →  Translation overlay
+screen_selector  ocr_engine  llm_client      overlay
+                  (wired together by main)
 ```
 
-The application therefore does not require a dedicated GPU. A GPU is only an optional acceleration method for the OCR stage.
+1. **Capture.** A screenshot of the whole desktop is taken and shown frozen; you drag a rectangle over the text.
+2. **OCR.** The cropped image is recognized by [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX Runtime, CPU).
+3. **Translation.** The text is sent to `/v1/chat/completions` with a system prompt asking for the translation only.
+4. **Output.** The result appears in a frameless, always-on-top, semi-transparent window next to the selected area.
 
-## Key Features
+OCR and the network request run in a separate thread, so the UI does not freeze.
 
-* **Full Privacy:** When used with a local LLM, all processing remains on your hardware. No telemetry or third-party cloud tracking is included.
-* **Universal Compatibility:** Works over any full-screen or windowed application, web page, or document interface.
-* **Modular Architecture:** Clean separation of concerns between the graphical interface, screen selector, OCR processing, and LLM communication clients.
-* **System Tray Integration:** Runs discreetly in the background with quick access controls.
+## Features
 
-## System Requirements
+- Snipping-Tool-style region selection (multi-monitor and HiDPI aware).
+- No external OCR binaries: everything installs through `pip`.
+- Any OpenAI-compatible server: LM Studio, Ollama, OpenAI and others.
+- Overlay: draggable, copy, collapse, close (`Esc`).
+- Reasoning models are supported: `<think>…</think>` blocks are stripped from the answer.
+- Connection settings are saved between launches.
+- Modular architecture: every module has a single responsibility and can be replaced independently.
 
-* Python 3.10 or higher.
-* A running local LLM server instance (such as LM Studio active on `http://localhost:1234`) or a valid API endpoint key for compatible services.
-* **GPU acceleration (optional):** NVIDIA GPU with a CUDA-compatible PyTorch installation. The application automatically uses the GPU when CUDA is available and falls back to CPU otherwise.
+## Requirements
 
-### GPU Acceleration
-
-GPU acceleration is optional. The application can run entirely on the CPU.
-
-* **NVIDIA GPUs:** For CUDA acceleration, install the appropriate CUDA-enabled PyTorch version for your GPU using the official PyTorch installation guide:
-  https://pytorch.org/get-started/locally/
-* **AMD GPUs:** CUDA is not supported. The application will automatically use the CPU.
-* **Intel Arc GPUs:** CUDA is not supported. The application will automatically use the CPU.
-* **No dedicated GPU:** The application will automatically use the CPU.
-
-For NVIDIA GPUs, when configuring PyTorch, select:
-
-* **OS:** Windows
-* **Package:** Pip
-* **Language:** Python
-* **Compute Platform:** The CUDA version appropriate for your GPU
-
-The application automatically detects CUDA at startup. If CUDA is available, EasyOCR uses the NVIDIA GPU; otherwise, it falls back to the CPU.
+- Python 3.10–3.12.
+- A running LLM server with a loaded model (for example LM Studio at `http://localhost:1234`) or an API key for a compatible service.
+- Windows, macOS or Linux (X11). See [Known limitations](#known-limitations-and-pitfalls).
 
 ## Installation
 
-Clone the repository:
-
 ```bash
-git clone https://github.com/ananie1/ananie1-Local-AI-Screen-Translator.git
-cd ananie1-Local-AI-Screen-Translator
-```
-
-Install the required dependencies:
-
-```bash
+git clone <repository-url>
+cd <repository-folder>
+python -m venv .venv
+# Windows:      .venv\Scripts\activate
+# Linux/macOS:  source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configuration and Usage
-
-### Running the Application
-
-Execute the main entry point script:
+## Usage
 
 ```bash
 python main.py
 ```
 
-### Changing Hotkeys
+1. Start your LLM server and load a model.
+2. In the app window set the **URL**, the **API key** (if needed) and the **model name**.
+3. Click **"Выделить область и перевести"** (select area and translate).
+4. Drag over the text. `Esc` or right click cancels.
+5. The translation appears above the area (below it if there is no room above).
 
-Global keyboard shortcuts are handled via the `keyboard` library. To modify the shortcut bindings, open the primary event handler file and locate the hotkey registration lines. Replace the default key string with your preferred key combination.
+### Connection settings
 
-### Changing Languages
+| Service   | URL                                          | API key      | Model                          |
+|-----------|----------------------------------------------|--------------|--------------------------------|
+| LM Studio | `http://localhost:1234/v1/chat/completions`  | not required | any (`local-model`)            |
+| Ollama    | `http://localhost:11434/v1/chat/completions` | not required | exact name from `ollama list`  |
+| OpenAI    | `https://api.openai.com/v1/chat/completions` | required     | e.g. `gpt-4o-mini`             |
 
-* **OCR Language:** The recognition language can be changed in `ocr_engine.py` by modifying the `lang_list` parameter. Multiple languages can be specified at the same time, for example `['en', 'ru', 'de']`.
-* **Translation Language:** The target language for translation is controlled through the system prompt in `llm_client.py`.
+### Customization
 
-## Project Structure
+- **Target language / behaviour:** edit `SYSTEM_PROMPT` in `llm_client.py`.
+- **Timeout and temperature:** defaults of `LLMConfig` in `llm_client.py` (120 s and 0.2).
+- **OCR engine:** replace the body of `OcrEngine.recognize()` in `ocr_engine.py`; the rest of the app only needs a method that takes a PIL image and returns a string.
 
-* `main.py` - Application entry point, system tray logic, and core event loop.
-* `overlay.py` - Semi-transparent graphical interface for screen region selection.
-* `ocr_engine.py` - Text recognition wrapper utilizing EasyOCR.
-* `llm_client.py` - API communication layer interfacing with the local LLM server.
-* `screen_selector.py` - Screen coordinate capture utility.
+## Project structure
+
+| File                 | Purpose                                              |
+|----------------------|------------------------------------------------------|
+| `main.py`            | Settings GUI, background thread, module wiring       |
+| `screen_selector.py` | Region selection and screenshot                      |
+| `ocr_engine.py`      | Text recognition                                     |
+| `llm_client.py`      | OpenAI-compatible API client                         |
+| `overlay.py`         | Transparent translation window                       |
+
+## CPU, GPU and performance
+
+- The bundled OCR runs on the **CPU** only. A GPU is not required and gives no benefit here.
+- The LLM is a separate component. Whether it uses CPU or GPU depends only on your server (LM Studio, Ollama) and model settings.
+- In practice, translation by the LLM usually takes much longer than OCR, so OCR is rarely the bottleneck.
+- Larger selections take longer to recognize and translate. Select only the text you need.
+
+## Known limitations and pitfalls
+
+**OCR**
+
+- The default RapidOCR models recognize Latin and Chinese text, but **not Cyrillic and not Japanese**. The app is aimed at translating *into* Russian from such languages as English.
+- Small, low-contrast or stylized text (game fonts, text over busy backgrounds) may be recognized badly. OCR mistakes go straight into the translation.
+- Text in several columns can come out interleaved, because lines are ordered top to bottom and then left to right. Select one column at a time.
+- Vertical and strongly rotated text is not supported.
+- The first OCR call after launch is slower because the model is loaded lazily.
+
+**Screen capture**
+
+- Games in **exclusive fullscreen** and DRM-protected video (some streaming services) may give a black screenshot, and the overlay may not appear on top of them. Use windowed or borderless mode.
+- With different DPI scaling on different monitors, the selection edges can be slightly off.
+- macOS: grant the app (your terminal or IDE) the **Screen Recording** permission.
+- Linux: on Wayland capture through `mss` may not work, use an X11 session.
+
+**LLM**
+
+- The server must be running and a model must be loaded. Otherwise you get a connection error or HTTP 404.
+- In Ollama the model name must match `ollama list` exactly.
+- Small local models sometimes add comments or refuse, even though the prompt asks for the translation only. Try a larger or instruction-tuned model.
+- The first request to a local model can take a long time (loading into memory). The timeout is 120 seconds.
+- Very long texts are sent in a single request and can exceed the model's context window.
+
+**Security and privacy**
+
+- With a local LLM, text never leaves your computer. With an external API, **the recognized text is sent to that provider**.
+- The API key is stored unencrypted in the application settings (`QSettings`; on Windows this is the registry). Do not use a key with unlimited spending.
+- The screenshot is kept in memory only for the duration of one request and is never written to disk.
+
+## Troubleshooting
+
+| Symptom                                   | Likely cause and fix                                                      |
+|-------------------------------------------|---------------------------------------------------------------------------|
+| "Не удалось подключиться к …"             | Server is not started, wrong port or URL.                                 |
+| HTTP 404 / model not found                | Model is not loaded or the name is wrong.                                 |
+| HTTP 401 / 403                            | Missing or wrong API key.                                                 |
+| "Текст в выделенной области не найден"    | Text too small, low contrast, or unsupported script (Cyrillic, Japanese). |
+| Black selection background                | Exclusive fullscreen or protected content, see above.                     |
+| Empty or strange translation              | Model is too small or is a reasoning model; try another one.              |
 
 ## License
 
-Distributed under the MIT License.
-
----
+See the `LICENSE` file.
