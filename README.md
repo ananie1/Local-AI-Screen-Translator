@@ -42,8 +42,8 @@ OCR and the network request run in a separate thread, so the UI does not freeze.
 ## Installation
 
 ```bash
-git clone <repository-url>
-cd <repository-folder>
+git clone https://github.com/ananie1/Local-AI-Screen-Translator.git
+cd Local-AI-Screen-Translator
 python -m venv .venv
 # Windows:      .venv\Scripts\activate
 # Linux/macOS:  source .venv/bin/activate
